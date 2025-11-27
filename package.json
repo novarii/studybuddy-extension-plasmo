@@ -5,9 +5,9 @@
   "description": "Download Panopto recordings.",
   "author": "novarii",
   "scripts": {
-    "dev": "cross-env PLASMO_SRC_PATH=src plasmo dev",
-    "build": "cross-env PLASMO_SRC_PATH=src plasmo build",
-    "package": "cross-env PLASMO_SRC_PATH=src plasmo package"
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
   },
   "dependencies": {
     "@clerk/chrome-extension": "^2.8.6",
