@@ -27,6 +27,9 @@
   "manifest": {
     "host_permissions": [
       "https://*/*"
+    ],
+    "permissions": [
+      "storage", "activeTab", "tabs", "scripting", "notifications"
     ]
   }
 }
