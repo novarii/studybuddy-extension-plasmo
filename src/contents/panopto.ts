@@ -20,7 +20,11 @@ type DownloadResult = {
   error?: string
 }
 
-const handleSingleDownload = async (courseId: string, courseName: string): Promise<DownloadResult> => {
+const handleSingleDownload = async (
+  courseId: string,
+  courseName: string,
+  sessionToken?: string
+): Promise<DownloadResult> => {
   const url = new URL(window.location.href)
   const videoId = url.searchParams.get("id") ?? url.searchParams.get("tid")
   const isTid = url.searchParams.has("tid")
@@ -46,7 +50,8 @@ const handleSingleDownload = async (courseId: string, courseName: string): Promi
       backendUrl: resolvedBackend,
       courseId,
       courseName,
-      apiKey
+      apiKey,
+      sessionToken
     })
 
     if (additionalStreams?.length) {
@@ -105,6 +110,7 @@ type BackendPayload = {
   courseId: string
   courseName: string
   apiKey?: string | null
+  sessionToken?: string
 }
 
 const sendToBackend = async ({
@@ -115,10 +121,13 @@ const sendToBackend = async ({
   backendUrl,
   courseId,
   courseName,
-  apiKey
+  apiKey,
+  sessionToken
 }: BackendPayload) => {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (apiKey) {
+  if (sessionToken) {
+    headers.Authorization = `Bearer ${sessionToken}`
+  } else if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`
   }
 
@@ -144,7 +153,7 @@ const sendToBackend = async ({
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request?.action === "downloadVideo") {
-    handleSingleDownload(request.courseId, request.courseName)
+    handleSingleDownload(request.courseId, request.courseName, request.sessionToken)
       .then(sendResponse)
       .catch((error) => {
         sendResponse({

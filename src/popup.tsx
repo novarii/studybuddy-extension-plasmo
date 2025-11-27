@@ -1,3 +1,4 @@
+import { ClerkProvider, SignInButton, SignedIn, SignedOut, UserButton, useAuth } from "@clerk/chrome-extension"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import "~src/styles/extension.css"
@@ -26,6 +27,17 @@ type RawCourse = {
 
 const SUPPORTED_HOSTS = ["panopto.com", "panopto.eu"]
 const VIEWER_PATHS = ["/Panopto/Pages/Viewer.aspx", "/Panopto/Pages/Embed.aspx"]
+
+const PUBLISHABLE_KEY = process.env.PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY
+
+if (!PUBLISHABLE_KEY) {
+  throw new Error("Please add the PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY to the .env.development file")
+}
+
+const extensionPopupUrl =
+  typeof chrome !== "undefined" && chrome.runtime?.getURL
+    ? chrome.runtime.getURL("popup.html")
+    : "chrome-extension://__plasmo__/popup.html"
 
 const queryActiveTab = async (): Promise<chrome.tabs.Tab | null> => {
   return new Promise((resolve, reject) => {
@@ -73,7 +85,8 @@ const extractVideoId = (url: string): string | null => {
   }
 }
 
-function Popup() {
+const PopupContent = () => {
+  const { getToken } = useAuth()
   const [tabId, setTabId] = useState<number | null>(null)
   const [videoId, setVideoId] = useState<string | null>(null)
   const [courses, setCourses] = useState<CourseOption[]>([])
@@ -165,7 +178,10 @@ function Popup() {
       setBackendUrl(resolvedBackend)
 
       const headers: Record<string, string> = { "Content-Type": "application/json" }
-      if (settings.apiKey) {
+      const sessionToken = (await getToken?.()) ?? undefined
+      if (sessionToken) {
+        headers.Authorization = `Bearer ${sessionToken}`
+      } else if (settings.apiKey) {
         headers.Authorization = `Bearer ${settings.apiKey}`
       }
 
@@ -237,6 +253,7 @@ function Popup() {
     }
 
     const courseName = courses.find((course) => course.id === selectedCourse)?.label ?? ""
+    const sessionToken = (await getToken?.()) ?? undefined
 
     setIsSending(true)
     showStatus("info", "Getting video link…")
@@ -247,7 +264,8 @@ function Popup() {
         {
           action: "downloadVideo",
           courseId: selectedCourse,
-          courseName
+          courseName,
+          sessionToken
         }
       )
 
@@ -275,45 +293,73 @@ function Popup() {
   }, [status])
 
   return (
-    <div className="extension-root" style={{ width: 300 }}>
-      <div className="extension-card">
+    <div className="extension-card">
+      <header className="popup-header">
         <h3>Study Buddy</h3>
+        <UserButton />
+      </header>
 
-        <div className={`page-info ${pageInfoIsError ? "error" : ""}`}>{pageInfo}</div>
+      <div className={`page-info ${pageInfoIsError ? "error" : ""}`}>{pageInfo}</div>
 
-        <label htmlFor="course-select">Send to Course:</label>
-        <select
-          id="course-select"
-          disabled={isLoadingCourses || courses.length === 0}
-          value={selectedCourse}
-          onChange={(event) => setSelectedCourse(event.target.value)}>
-          <option value="">
-            {isLoadingCourses
-              ? "Loading courses..."
-              : courses.length === 0
-                ? "No courses available"
-                : "-- Select a course --"}
+      <label htmlFor="course-select">Send to Course:</label>
+      <select
+        id="course-select"
+        disabled={isLoadingCourses || courses.length === 0}
+        value={selectedCourse}
+        onChange={(event) => setSelectedCourse(event.target.value)}>
+        <option value="">
+          {isLoadingCourses
+            ? "Loading courses..."
+            : courses.length === 0
+              ? "No courses available"
+              : "-- Select a course --"}
+        </option>
+        {courses.map((course) => (
+          <option key={course.id} value={course.id}>
+            {course.label}
           </option>
-          {courses.map((course) => (
-            <option key={course.id} value={course.id}>
-              {course.label}
-            </option>
-          ))}
-        </select>
+        ))}
+      </select>
 
-        <div className={statusClassName}>{status?.message}</div>
+      <div className={statusClassName}>{status?.message}</div>
 
-        <button disabled={buttonDisabled} onClick={handleSend}>
-          {isSending ? "Sending..." : "Send to Study Buddy"}
-        </button>
+      <button disabled={buttonDisabled} onClick={handleSend}>
+        {isSending ? "Sending..." : "Send to Study Buddy"}
+      </button>
 
-        <div className="help-text">
-          Backend: {backendUrl || "Not configured"} <br />
-          Courses refresh automatically on popup open.
-        </div>
+      <div className="help-text">
+        Backend: {backendUrl || "Not configured"} <br />
+        Courses refresh automatically on popup open.
       </div>
     </div>
   )
 }
+
+const SignedOutView = () => (
+  <div className="extension-card">
+    <h3>Study Buddy</h3>
+    <p className="page-info">Sign in with Clerk to continue.</p>
+    <SignInButton mode="modal">
+      <button>Sign in</button>
+    </SignInButton>
+  </div>
+)
+
+const Popup = () => (
+  <ClerkProvider
+    publishableKey={PUBLISHABLE_KEY}
+    afterSignOutUrl={extensionPopupUrl}
+    signInFallbackRedirectUrl={extensionPopupUrl}
+    signUpFallbackRedirectUrl={extensionPopupUrl}>
+    <div className="extension-root" style={{ width: 300 }}>
+      <SignedOut>
+        <SignedOutView />
+      </SignedOut>
+      <SignedIn>
+        <PopupContent />
+      </SignedIn>
+    </div>
+  </ClerkProvider>
+)
 
 export default Popup

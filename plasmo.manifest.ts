@@ -1,10 +1,18 @@
+const clerkHost = process.env.CLERK_FRONTEND_API ? `${process.env.CLERK_FRONTEND_API}/*` : null
+
 const manifest = {
   manifest_version: 3,
   name: "Study Buddy",
   version: "1.0.0",
   description: "Send Panopto videos to Study Buddy",
-  permissions: ["storage", "activeTab", "tabs", "scripting", "notifications"],
-  host_permissions: ["https://*.panopto.com/*", "https://*.panopto.eu/*", "http://localhost:8000/*"],
+  permissions: ["storage", "activeTab", "tabs", "scripting", "notifications", "cookies"],
+  host_permissions: [
+    "https://*.panopto.com/*",
+    "https://*.panopto.eu/*",
+    "http://localhost:8000/*",
+    "http://localhost/*",
+    ...(clerkHost ? [clerkHost] : [])
+  ],
   action: {
     default_title: "Study Buddy",
     default_popup: "popup.html",
