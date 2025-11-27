@@ -139,7 +139,8 @@ const sendToBackend = async ({
     headers,
     body: JSON.stringify({
       course_id: courseId,
-      panopto_url: sourceUrl ?? streamUrl,
+      panopto_url: sourceUrl ?? window.location.href ?? streamUrl,
+      stream_url: streamUrl,
       title: title ?? document.title ?? null
     })
   })
