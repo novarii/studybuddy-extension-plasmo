@@ -252,25 +252,32 @@ const PopupContent = () => {
       return
     }
 
-    const courseName = courses.find((course) => course.id === selectedCourse)?.label ?? ""
     const sessionToken = (await getToken?.()) ?? undefined
 
     setIsSending(true)
     showStatus("info", "Getting video link…")
 
     try {
-      const response = await sendMessage<{ success: boolean; message?: string; error?: string }>(
+      const response = await sendMessage<{
+        success: boolean
+        message?: string
+        error?: string
+        lectureId?: string
+      }>(
         tabId,
         {
           action: "downloadVideo",
           courseId: selectedCourse,
-          courseName,
           sessionToken
         }
       )
 
       if (response?.success) {
-        showStatus("success", response.message ?? "Video sent to Study Buddy! ✓")
+        const lectureHint = response.lectureId ? ` (Lecture ID: ${response.lectureId})` : ""
+        showStatus(
+          "success",
+          `${response.message ?? "Video sent to Study Buddy! ✓"}${lectureHint}`
+        )
       } else {
         showStatus("error", response?.error ?? "Unknown error")
       }

@@ -18,11 +18,11 @@ type DownloadResult = {
   success: boolean
   message?: string
   error?: string
+  lectureId?: string
 }
 
 const handleSingleDownload = async (
   courseId: string,
-  courseName: string,
   sessionToken?: string
 ): Promise<DownloadResult> => {
   const url = new URL(window.location.href)
@@ -33,7 +33,7 @@ const handleSingleDownload = async (
     return { success: false, error: "Failed to get Lesson ID." }
   }
 
-  if (!courseId || !courseName) {
+  if (!courseId) {
     return { success: false, error: "Course selection is required." }
   }
 
@@ -42,14 +42,12 @@ const handleSingleDownload = async (
     const { backendUrl, apiKey } = await getSettings()
     const resolvedBackend = backendUrl?.trim() || DEFAULT_BACKEND_URL
 
-    await sendToBackend({
+    const lectureResponse = await sendToBackend({
       streamUrl,
-      videoId,
       title: document.title,
       sourceUrl: window.location.href,
       backendUrl: resolvedBackend,
       courseId,
-      courseName,
       apiKey,
       sessionToken
     })
@@ -58,7 +56,11 @@ const handleSingleDownload = async (
       console.info("Additional streams detected:", additionalStreams.length)
     }
 
-    return { success: true, message: "Video sent to Study Buddy! Download started." }
+    return {
+      success: true,
+      message: "Video sent to Study Buddy! Download started.",
+      lectureId: lectureResponse?.lecture_id
+    }
   } catch (error) {
     console.error("Download error:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
@@ -103,27 +105,28 @@ const requestDeliveryInfo = async (videoId: string, isTid = false) => {
 
 type BackendPayload = {
   streamUrl: string
-  videoId: string
-  title: string
-  sourceUrl: string
+  title?: string | null
+  sourceUrl?: string
   backendUrl: string
   courseId: string
-  courseName: string
   apiKey?: string | null
   sessionToken?: string
 }
 
+type LectureDownloadResponse = {
+  lecture_id: string
+  status: string
+}
+
 const sendToBackend = async ({
   streamUrl,
-  videoId,
   title,
   sourceUrl,
   backendUrl,
   courseId,
-  courseName,
   apiKey,
   sessionToken
-}: BackendPayload) => {
+}: BackendPayload): Promise<LectureDownloadResponse | null> => {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (sessionToken) {
     headers.Authorization = `Bearer ${sessionToken}`
@@ -131,17 +134,13 @@ const sendToBackend = async ({
     headers.Authorization = `Bearer ${apiKey}`
   }
 
-  const response = await fetch(`${backendUrl}/api/videos/download`, {
+  const response = await fetch(`${backendUrl}/api/lectures/download`, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      stream_url: streamUrl,
-      video_id: videoId,
-      title: title || document.title,
-      source_url: sourceUrl || window.location.href,
       course_id: courseId,
-      course_name: courseName,
-      audio_only: true
+      panopto_url: sourceUrl ?? streamUrl,
+      title: title ?? document.title ?? null
     })
   })
 
@@ -149,11 +148,13 @@ const sendToBackend = async ({
     const error = await response.json().catch(() => ({ detail: "Unknown error" }))
     throw new Error(error.detail || `HTTP ${response.status}`)
   }
+
+  return (await response.json().catch(() => null)) as LectureDownloadResponse | null
 }
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request?.action === "downloadVideo") {
-    handleSingleDownload(request.courseId, request.courseName, request.sessionToken)
+    handleSingleDownload(request.courseId, request.sessionToken)
       .then(sendResponse)
       .catch((error) => {
         sendResponse({
