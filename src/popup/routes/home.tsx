@@ -335,7 +335,7 @@ const PopupContent = () => {
 }
 
 const SignedOutView = () => (
-  <div className="extension-card">
+  <div className="extension-card" style={{ minHeight: 420 }}>
     <h3>Study Buddy</h3>
     <p className="page-info">Sign in with Clerk to continue.</p>
     <SignInButton mode="modal">

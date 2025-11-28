@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react"
+
 import { ClerkProvider } from "@clerk/chrome-extension"
-import { Outlet, useNavigate } from "react-router"
+import { Outlet, useLocation, useNavigate } from "react-router"
 
 const PUBLISHABLE_KEY = process.env.PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY
 
@@ -14,6 +16,12 @@ const extensionPopupUrl =
 
 export const RootLayout = () => {
   const navigate = useNavigate()
+  const location = useLocation()
+  const isAuthRoute = ["/sign-in", "/sign-up", "/settings"].includes(location.pathname)
+
+  const containerStyle: CSSProperties = isAuthRoute
+    ? { width: 360, minHeight: 520 }
+    : { width: 300 }
 
   return (
     <ClerkProvider
@@ -23,7 +31,7 @@ export const RootLayout = () => {
       afterSignOutUrl="/"
       signInFallbackRedirectUrl={extensionPopupUrl}
       signUpFallbackRedirectUrl={extensionPopupUrl}>
-      <div className="extension-root" style={{ width: 300 }}>
+      <div className="extension-root" style={containerStyle}>
         <Outlet />
       </div>
     </ClerkProvider>
