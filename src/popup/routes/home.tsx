@@ -1,7 +1,5 @@
-import { ClerkProvider, SignInButton, SignedIn, SignedOut, UserButton, useAuth } from "@clerk/chrome-extension"
+import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from "@clerk/chrome-extension"
 import { useEffect, useMemo, useRef, useState } from "react"
-
-import "~src/styles/extension.css"
 
 import { DEFAULT_BACKEND_URL, getSettings } from "~src/lib/storage"
 
@@ -27,17 +25,6 @@ type RawCourse = {
 
 const SUPPORTED_HOSTS = ["panopto.com", "panopto.eu"]
 const VIEWER_PATHS = ["/Panopto/Pages/Viewer.aspx", "/Panopto/Pages/Embed.aspx"]
-
-const PUBLISHABLE_KEY = process.env.PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY
-
-if (!PUBLISHABLE_KEY) {
-  throw new Error("Please add the PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY to the .env.development file")
-}
-
-const extensionPopupUrl =
-  typeof chrome !== "undefined" && chrome.runtime?.getURL
-    ? chrome.runtime.getURL("popup.html")
-    : "chrome-extension://__plasmo__/popup.html"
 
 const queryActiveTab = async (): Promise<chrome.tabs.Tab | null> => {
   return new Promise((resolve, reject) => {
@@ -84,6 +71,17 @@ const extractVideoId = (url: string): string | null => {
     return null
   }
 }
+
+export const Home = () => (
+  <>
+    <SignedOut>
+      <SignedOutView />
+    </SignedOut>
+    <SignedIn>
+      <PopupContent />
+    </SignedIn>
+  </>
+)
 
 const PopupContent = () => {
   const { getToken } = useAuth()
@@ -263,21 +261,15 @@ const PopupContent = () => {
         message?: string
         error?: string
         lectureId?: string
-      }>(
-        tabId,
-        {
-          action: "downloadVideo",
-          courseId: selectedCourse,
-          sessionToken
-        }
-      )
+      }>(tabId, {
+        action: "downloadVideo",
+        courseId: selectedCourse,
+        sessionToken
+      })
 
       if (response?.success) {
         const lectureHint = response.lectureId ? ` (Lecture ID: ${response.lectureId})` : ""
-        showStatus(
-          "success",
-          `${response.message ?? "Video sent to Study Buddy! ✓"}${lectureHint}`
-        )
+        showStatus("success", `${response.message ?? "Video sent to Study Buddy! ✓"}${lectureHint}`)
       } else {
         showStatus("error", response?.error ?? "Unknown error")
       }
@@ -352,21 +344,4 @@ const SignedOutView = () => (
   </div>
 )
 
-const Popup = () => (
-  <ClerkProvider
-    publishableKey={PUBLISHABLE_KEY}
-    afterSignOutUrl={extensionPopupUrl}
-    signInFallbackRedirectUrl={extensionPopupUrl}
-    signUpFallbackRedirectUrl={extensionPopupUrl}>
-    <div className="extension-root" style={{ width: 300 }}>
-      <SignedOut>
-        <SignedOutView />
-      </SignedOut>
-      <SignedIn>
-        <PopupContent />
-      </SignedIn>
-    </div>
-  </ClerkProvider>
-)
-
-export default Popup
+export default Home
