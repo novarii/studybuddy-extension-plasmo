@@ -12,6 +12,7 @@
 # misc
 .DS_Store
 *.pem
+.pnpm-store
 
 # debug
 npm-debug.log*
@@ -33,3 +34,4 @@ dist/
 .tsbuildinfo
 
 .env.development
+.env.chrome
