@@ -1,7 +1,8 @@
 import { SignInButton, SignedIn, SignedOut, UserButton, useAuth } from "@clerk/chrome-extension"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { DEFAULT_BACKEND_URL, getSettings } from "~src/lib/storage"
+import type { UploadProgress } from "~src/lib/types"
 
 type StatusState = {
   type: "success" | "error" | "info"
@@ -83,6 +84,48 @@ export const Home = () => (
   </>
 )
 
+// Progress bar component
+const ProgressBar = ({ progress }: { progress: UploadProgress }) => {
+  const getPhaseColor = () => {
+    switch (progress.phase) {
+      case "downloading":
+        return "#3b82f6" // blue
+      case "uploading":
+        return "#8b5cf6" // purple
+      case "processing":
+        return "#f59e0b" // amber
+      case "done":
+        return "#22c55e" // green
+      case "error":
+        return "#ef4444" // red
+      default:
+        return "#6b7280" // gray
+    }
+  }
+
+  const isIndeterminate = progress.phase === "processing" && progress.percent === 0
+
+  return (
+    <div className="progress-container">
+      <div className="progress-bar-wrapper">
+        <div
+          className={`progress-bar ${isIndeterminate ? "indeterminate" : ""}`}
+          style={{
+            width: isIndeterminate ? "100%" : `${progress.percent}%`,
+            backgroundColor: getPhaseColor()
+          }}
+        />
+      </div>
+      <div className="progress-message">{progress.message}</div>
+      {progress.method && (
+        <div className="progress-method">
+          {progress.method === "primary" ? "Direct upload" : "Server processing"}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const PopupContent = () => {
   const { getToken } = useAuth()
   const [tabId, setTabId] = useState<number | null>(null)
@@ -95,6 +138,7 @@ const PopupContent = () => {
   const [isLoadingCourses, setIsLoadingCourses] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [backendUrl, setBackendUrl] = useState("")
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null)
 
   const statusTimer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -107,6 +151,30 @@ const PopupContent = () => {
       }
     }
   }, [])
+
+  // Listen for progress updates from content script
+  const handleProgressMessage = useCallback(
+    (message: { action: string; progress?: UploadProgress }) => {
+      if (message?.action === "progressUpdate" && message.progress) {
+        setUploadProgress(message.progress)
+
+        // Auto-clear progress after completion or error
+        if (message.progress.phase === "done" || message.progress.phase === "error") {
+          setTimeout(() => {
+            setUploadProgress(null)
+          }, 3000)
+        }
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    chrome.runtime.onMessage.addListener(handleProgressMessage)
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleProgressMessage)
+    }
+  }, [handleProgressMessage])
 
   const showStatus = (type: StatusState["type"], message: string) => {
     setStatus({ type, message })
@@ -253,7 +321,12 @@ const PopupContent = () => {
     const sessionToken = (await getToken?.()) ?? undefined
 
     setIsSending(true)
-    showStatus("info", "Getting video link…")
+    setUploadProgress({
+      phase: "processing",
+      percent: 0,
+      message: "Starting..."
+    })
+    setStatus(null) // Clear any previous status
 
     try {
       const response = await sendMessage<{
@@ -261,6 +334,7 @@ const PopupContent = () => {
         message?: string
         error?: string
         lectureId?: string
+        method?: "primary" | "fallback"
       }>(tabId, {
         action: "downloadVideo",
         courseId: selectedCourse,
@@ -268,8 +342,9 @@ const PopupContent = () => {
       })
 
       if (response?.success) {
-        const lectureHint = response.lectureId ? ` (Lecture ID: ${response.lectureId})` : ""
-        showStatus("success", `${response.message ?? "Video sent to Study Buddy! ✓"}${lectureHint}`)
+        const lectureHint = response.lectureId ? ` (ID: ${response.lectureId})` : ""
+        const methodHint = response.method === "primary" ? " [Direct]" : " [Server]"
+        showStatus("success", `${response.message ?? "Upload complete!"}${lectureHint}${methodHint}`)
       } else {
         showStatus("error", response?.error ?? "Unknown error")
       }
@@ -291,6 +366,25 @@ const PopupContent = () => {
     return `status ${status.type} is-visible`
   }, [status])
 
+  const buttonText = useMemo(() => {
+    if (!isSending) return "Send to Study Buddy"
+
+    if (uploadProgress) {
+      switch (uploadProgress.phase) {
+        case "downloading":
+          return "Downloading..."
+        case "uploading":
+          return "Uploading..."
+        case "processing":
+          return "Processing..."
+        default:
+          return "Sending..."
+      }
+    }
+
+    return "Sending..."
+  }, [isSending, uploadProgress])
+
   return (
     <div className="extension-card">
       <header className="popup-header">
@@ -303,7 +397,7 @@ const PopupContent = () => {
       <label htmlFor="course-select">Send to Course:</label>
       <select
         id="course-select"
-        disabled={isLoadingCourses || courses.length === 0}
+        disabled={isLoadingCourses || courses.length === 0 || isSending}
         value={selectedCourse}
         onChange={(event) => setSelectedCourse(event.target.value)}>
         <option value="">
@@ -320,10 +414,12 @@ const PopupContent = () => {
         ))}
       </select>
 
+      {uploadProgress && isSending && <ProgressBar progress={uploadProgress} />}
+
       <div className={statusClassName}>{status?.message}</div>
 
       <button disabled={buttonDisabled} onClick={handleSend}>
-        {isSending ? "Sending..." : "Send to Study Buddy"}
+        {buttonText}
       </button>
 
       <div className="help-text">
