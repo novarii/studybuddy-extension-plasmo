@@ -2,12 +2,11 @@ import type { PlasmoCSConfig } from "plasmo"
 
 import { DEFAULT_BACKEND_URL, getSettings } from "~src/lib/storage"
 import type {
-  BackendPayload,
   DeliveryInfo,
-  DownloadResult,
-  FetchAndUploadAudioResponse,
-  LectureDownloadResponse,
-  LectureMetadata,
+  HlsVariant,
+  ImportResult,
+  BatchImportResult,
+  LectureStreamResponse,
   UploadProgress
 } from "~src/lib/types"
 
@@ -23,145 +22,144 @@ export const config: PlasmoCSConfig = {
   run_at: "document_idle"
 }
 
+const CONCURRENCY_LIMIT = 3
+
 const sendProgressUpdate = (progress: UploadProgress) => {
-  // Send to popup via runtime message
   chrome.runtime.sendMessage({ action: "progressUpdate", progress }).catch(() => {
     // Popup might be closed, ignore
   })
 }
 
-const handleSingleDownload = async (
+/**
+ * Import a single lecture
+ */
+const handleImportLecture = async (
   courseId: string,
   sessionToken?: string
-): Promise<DownloadResult> => {
+): Promise<ImportResult> => {
   const url = new URL(window.location.href)
-  const videoId = url.searchParams.get("id") ?? url.searchParams.get("tid")
-  const isTid = url.searchParams.has("tid")
+  const sessionId = url.searchParams.get("id") ?? url.searchParams.get("tid")
 
-  if (!videoId) {
-    return { success: false, error: "Failed to get Lesson ID." }
+  if (!sessionId) {
+    return { success: false, error: "No session ID found in URL" }
   }
 
   if (!courseId) {
-    return { success: false, error: "Course selection is required." }
+    return { success: false, error: "Course selection is required" }
   }
 
   try {
-    sendProgressUpdate({
-      phase: "processing",
-      percent: 0,
-      message: "Fetching lecture info..."
-    })
+    sendProgressUpdate({ phase: "extracting", percent: 0, message: "Fetching lecture info..." })
 
-    const deliveryInfo = await requestDeliveryInfo(videoId, isTid)
-    const { backendUrl, apiKey } = await getSettings()
-    const resolvedBackend = backendUrl?.trim() || DEFAULT_BACKEND_URL
+    const result = await extractAndIngest(sessionId, courseId, sessionToken)
 
-    // Check if audio podcast is available
-    if (deliveryInfo.isAudioPodcastReady) {
-      // Primary path: fetch and upload via background script
-      console.info("[StudyBuddy] Attempting primary path: direct audio upload")
+    sendProgressUpdate({ phase: "done", percent: 100, message: "Lecture imported!" })
 
-      sendProgressUpdate({
-        phase: "downloading",
-        percent: 0,
-        message: "Downloading audio...",
-        method: "primary"
-      })
-
-      const metadata: LectureMetadata = {
-        session_id: deliveryInfo.sessionId,
-        course_id: courseId,
-        title: deliveryInfo.sessionName || document.title,
-        duration: deliveryInfo.duration,
-        source_url: deliveryInfo.sourceUrl
-      }
-
-      const audioPodcastUrl = `${window.location.origin}/Panopto/Podcast/Download/${deliveryInfo.publicId}.mp4?mediaTargetType=audioPodcast`
-
-      const result = await fetchAndUploadViaBackground({
-        audioPodcastUrl,
-        metadata,
-        backendUrl: resolvedBackend,
-        sessionToken,
-        apiKey
-      })
-
-      if (result.success) {
-        sendProgressUpdate({
-          phase: "done",
-          percent: 100,
-          message: "Upload complete!",
-          method: "primary"
-        })
-
-        return {
-          success: true,
-          message: "Audio uploaded directly to Study Buddy!",
-          lectureId: result.lectureId,
-          method: "primary"
-        }
-      }
-
-      // If primary path failed, fall through to fallback
-      console.warn("[StudyBuddy] Primary path failed:", result.error)
-    }
-
-    // Fallback path: send URL for backend processing
-    console.info("[StudyBuddy] Using fallback path: server-side processing")
-
-    sendProgressUpdate({
-      phase: "processing",
-      percent: 50,
-      message: "Using server-side processing...",
-      method: "fallback"
-    })
-
-    const lectureResponse = await sendToBackendFallback({
-      streamUrl: deliveryInfo.fallbackStreamUrl!,
-      title: deliveryInfo.sessionName || document.title,
-      sourceUrl: deliveryInfo.sourceUrl,
-      backendUrl: resolvedBackend,
-      courseId,
-      apiKey,
-      sessionToken
-    })
-
-    sendProgressUpdate({
-      phase: "done",
-      percent: 100,
-      message: "Request sent to server!",
-      method: "fallback"
-    })
-
-    return {
-      success: true,
-      message: "Video sent for server-side processing.",
-      lectureId: lectureResponse?.lecture_id,
-      method: "fallback"
-    }
+    return result
   } catch (error) {
-    console.error("[StudyBuddy] Download error:", error)
-
-    sendProgressUpdate({
-      phase: "error",
-      percent: 0,
-      message: error instanceof Error ? error.message : "Unknown error"
-    })
-
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
+    const errorMsg = error instanceof Error ? error.message : "Unknown error"
+    sendProgressUpdate({ phase: "error", percent: 0, message: errorMsg })
+    return { success: false, error: errorMsg }
   }
 }
 
 /**
- * Fetches delivery info from Panopto API and extracts relevant fields
+ * Batch import multiple lectures with concurrency limit
  */
-const requestDeliveryInfo = async (videoId: string, isTid = false): Promise<DeliveryInfo> => {
-  const url = `${window.location.origin}/Panopto/Pages/Viewer/DeliveryInfo.aspx`
+const handleBatchImport = async (
+  sessionIds: string[],
+  courseId: string,
+  sessionToken?: string
+): Promise<BatchImportResult> => {
+  const results: BatchImportResult["results"] = []
+  const total = sessionIds.length
+  let completed = 0
 
-  const body = isTid
-    ? `&tid=${videoId}&isLiveNotes=false&refreshAuthCookie=true&isActiveBroadcast=false&isEditing=false&isKollectiveAgentInstalled=false&isEmbed=false&responseType=json`
-    : `deliveryId=${videoId}&isEmbed=true&responseType=json`
+  // Process in chunks with concurrency limit
+  const processChunk = async (ids: string[]) => {
+    const promises = ids.map(async (sessionId) => {
+      try {
+        const result = await extractAndIngest(sessionId, courseId, sessionToken)
+        return { sessionId, success: result.success, lectureId: result.lectureId, error: result.error }
+      } catch (error) {
+        return { sessionId, success: false, error: error instanceof Error ? error.message : "Unknown error" }
+      } finally {
+        completed++
+        sendProgressUpdate({
+          phase: "processing",
+          percent: Math.round((completed / total) * 100),
+          message: `Importing lectures...`,
+          current: completed,
+          total
+        })
+      }
+    })
+    return Promise.all(promises)
+  }
+
+  // Split into chunks of CONCURRENCY_LIMIT
+  for (let i = 0; i < sessionIds.length; i += CONCURRENCY_LIMIT) {
+    const chunk = sessionIds.slice(i, i + CONCURRENCY_LIMIT)
+    const chunkResults = await processChunk(chunk)
+    results.push(...chunkResults)
+  }
+
+  const successCount = results.filter((r) => r.success).length
+  sendProgressUpdate({
+    phase: "done",
+    percent: 100,
+    message: `Imported ${successCount}/${total} lectures`
+  })
+
+  return { success: successCount > 0, results }
+}
+
+/**
+ * Core function: extract stream URL and send to backend
+ */
+const extractAndIngest = async (
+  sessionId: string,
+  courseId: string,
+  sessionToken?: string
+): Promise<ImportResult> => {
+  console.log("[StudyBuddy] Starting extraction for session:", sessionId)
+
+  // Step 1: Get delivery info from Panopto
+  const deliveryInfo = await fetchDeliveryInfo(sessionId)
+  console.log("[StudyBuddy] Got delivery info:", deliveryInfo)
+
+  // Step 2: Fetch and parse HLS master playlist
+  const lowestVariant = await getLowestBandwidthVariant(deliveryInfo.masterPlaylistUrl)
+  console.log("[StudyBuddy] Selected variant:", lowestVariant)
+
+  // Step 3: Send to backend
+  const { backendUrl, apiKey } = await getSettings()
+  const resolvedBackend = backendUrl?.trim() || DEFAULT_BACKEND_URL
+
+  const response = await ingestToBackend({
+    streamUrl: lowestVariant.url,
+    sessionId: deliveryInfo.sessionId,
+    courseId,
+    title: deliveryInfo.sessionName,
+    duration: deliveryInfo.duration,
+    sourceUrl: deliveryInfo.sourceUrl,
+    backendUrl: resolvedBackend,
+    sessionToken,
+    apiKey
+  })
+
+  return {
+    success: true,
+    message: "Lecture sent for processing",
+    lectureId: response.lecture_id
+  }
+}
+
+/**
+ * Fetch delivery info from Panopto API
+ */
+const fetchDeliveryInfo = async (sessionId: string): Promise<DeliveryInfo> => {
+  const url = `${window.location.origin}/Panopto/Pages/Viewer/DeliveryInfo.aspx`
 
   const response = await fetch(url, {
     method: "POST",
@@ -169,138 +167,178 @@ const requestDeliveryInfo = async (videoId: string, isTid = false): Promise<Deli
       accept: "application/json, text/javascript, */*; q=0.01",
       "content-type": "application/x-www-form-urlencoded;charset=UTF-8"
     },
-    body
+    body: `deliveryId=${sessionId}&isEmbed=true&responseType=json`
   })
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    throw new Error(`Failed to fetch delivery info: HTTP ${response.status}`)
   }
 
   const data = await response.json()
 
   if (data.ErrorCode) {
-    throw new Error(data.ErrorMessage || "Unknown error from Panopto API")
+    throw new Error(data.ErrorMessage || "Panopto API error")
   }
 
-  // Extract the stream URL for fallback
-  const streamUrl = data.Delivery?.PodcastStreams?.[0]?.StreamUrl
-  const fallbackStreamUrl =
-    streamUrl ||
-    data.Delivery?.Streams?.[0]?.StreamHttpUrl ||
-    data.Delivery?.Streams?.[0]?.Variants?.[0]?.Url ||
-    null
+  // Use HLS stream URL
+  const hlsUrl = data.Delivery?.Streams?.[0]?.StreamHttpUrl
+  const podcastStreamUrl = data.Delivery?.PodcastStreams?.[0]?.StreamUrl
 
-  if (!fallbackStreamUrl) {
+  const streamUrl = hlsUrl || podcastStreamUrl
+
+  if (!streamUrl) {
     throw new Error("No stream URL available")
   }
 
+  console.log("[StudyBuddy] Using stream URL:", hlsUrl ? "HLS" : "PodcastStream (MP4)", streamUrl)
+
   return {
-    publicId: data.Delivery?.PublicID || videoId,
-    sessionId: data.SessionId || videoId,
+    sessionId: data.SessionId || sessionId,
     sessionName: data.Delivery?.SessionName || "",
     duration: data.Delivery?.Duration || 0,
-    isAudioPodcastReady: data.Delivery?.IsAudioPodcastEncodeComplete === true,
-    fallbackStreamUrl,
+    masterPlaylistUrl: streamUrl,
     sourceUrl: window.location.href
   }
 }
 
 /**
- * Sends message to background script to fetch audio and upload to backend
- * This bypasses CORS and avoids large data transfers between contexts
+ * Get the stream URL to send to backend.
+ * If it's a direct MP4, return as-is. If HLS, parse and get lowest bandwidth variant.
  */
-const fetchAndUploadViaBackground = (params: {
-  audioPodcastUrl: string
-  metadata: LectureMetadata
+const getLowestBandwidthVariant = async (streamUrl: string): Promise<HlsVariant> => {
+  // If it's a direct MP4 (not HLS), return as-is
+  if (!streamUrl.includes(".m3u8")) {
+    console.log("[StudyBuddy] Direct MP4 URL, skipping HLS parsing")
+    return { bandwidth: 0, url: streamUrl }
+  }
+
+  // It's HLS - fetch and parse
+  const response = await fetch(streamUrl)
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch playlist: HTTP ${response.status}`)
+  }
+
+  const playlistText = await response.text()
+  const variants = parseHlsPlaylist(playlistText, streamUrl)
+
+  if (variants.length === 0) {
+    // Not a master playlist, return the URL as-is
+    return { bandwidth: 0, url: streamUrl }
+  }
+
+  // Sort by bandwidth and return lowest
+  variants.sort((a, b) => a.bandwidth - b.bandwidth)
+  return variants[0]
+}
+
+/**
+ * Parse HLS master playlist and extract variants
+ */
+const parseHlsPlaylist = (playlistText: string, baseUrl: string): HlsVariant[] => {
+  const variants: HlsVariant[] = []
+  const lines = playlistText.split("\n")
+  const baseUrlObj = new URL(baseUrl)
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      // Extract bandwidth
+      const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/)
+      const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0
+
+      // Next non-empty line should be the URL
+      let urlLine = ""
+      for (let j = i + 1; j < lines.length; j++) {
+        const nextLine = lines[j].trim()
+        if (nextLine && !nextLine.startsWith("#")) {
+          urlLine = nextLine
+          break
+        }
+      }
+
+      if (urlLine) {
+        // Resolve relative URLs
+        let variantUrl: string
+        if (urlLine.startsWith("http")) {
+          variantUrl = urlLine
+        } else {
+          // Relative URL - resolve against base
+          const urlParts = baseUrlObj.pathname.split("/")
+          urlParts.pop() // Remove filename
+          variantUrl = `${baseUrlObj.origin}${urlParts.join("/")}/${urlLine}`
+        }
+
+        variants.push({ bandwidth, url: variantUrl })
+      }
+    }
+  }
+
+  return variants
+}
+
+/**
+ * Send lecture data to backend via background script (avoids CORS)
+ */
+const ingestToBackend = (params: {
+  streamUrl: string
+  sessionId: string
+  courseId: string
+  title: string
+  duration: number
+  sourceUrl: string
   backendUrl: string
   sessionToken?: string
   apiKey?: string | null
-}): Promise<FetchAndUploadAudioResponse> => {
-  return new Promise((resolve) => {
+}): Promise<LectureStreamResponse> => {
+  return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
-        action: "fetchAndUploadAudio",
+        action: "postToBackend",
         ...params
       },
-      (response: FetchAndUploadAudioResponse) => {
+      (response) => {
         if (chrome.runtime.lastError) {
-          resolve({
-            success: false,
-            error: chrome.runtime.lastError.message || "Background operation failed"
-          })
+          reject(new Error(chrome.runtime.lastError.message || "Background request failed"))
+        } else if (response?.error) {
+          reject(new Error(response.error))
         } else {
-          resolve(response || { success: false, error: "No response from background" })
+          resolve(response)
         }
       }
     )
   })
 }
 
-/**
- * Sends stream URL to backend for server-side processing (fallback path)
- */
-const sendToBackendFallback = async ({
-  streamUrl,
-  title,
-  sourceUrl,
-  backendUrl,
-  courseId,
-  apiKey,
-  sessionToken
-}: BackendPayload): Promise<LectureDownloadResponse | null> => {
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (sessionToken) {
-    headers.Authorization = `Bearer ${sessionToken}`
-  } else if (apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`
-  }
-
-  const response = await fetch(`${backendUrl}/api/lectures/download`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      course_id: courseId,
-      panopto_url: sourceUrl ?? window.location.href ?? streamUrl,
-      stream_url: streamUrl,
-      title: title ?? document.title ?? null
-    })
-  })
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Unknown error" }))
-    throw new Error(error.detail || `HTTP ${response.status}`)
-  }
-
-  return (await response.json().catch(() => null)) as LectureDownloadResponse | null
-}
-
-/**
- * Formats bytes to human readable string
- */
-const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return "0 B"
-  const k = 1024
-  const sizes = ["B", "KB", "MB", "GB"]
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
-}
-
-// Listen for progress updates from background script
-chrome.runtime.onMessage.addListener((message) => {
-  if (message?.action === "backgroundProgress" && message.progress) {
-    sendProgressUpdate(message.progress)
-  }
-})
-
+// Message listeners
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request?.action === "downloadVideo") {
-    handleSingleDownload(request.courseId, request.sessionToken)
+  console.log("[StudyBuddy] Received message:", request?.action)
+
+  if (request?.action === "importLecture") {
+    handleImportLecture(request.courseId, request.sessionToken)
       .then(sendResponse)
       .catch((error) => {
-        sendResponse({
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error"
-        })
+        sendResponse({ success: false, error: error instanceof Error ? error.message : "Unknown error" })
+      })
+    return true
+  }
+
+  if (request?.action === "batchImport") {
+    handleBatchImport(request.sessionIds, request.courseId, request.sessionToken)
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({ success: false, results: [], error: error instanceof Error ? error.message : "Unknown error" })
+      })
+    return true
+  }
+
+  // Legacy support for downloadVideo action
+  if (request?.action === "downloadVideo") {
+    handleImportLecture(request.courseId, request.sessionToken)
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({ success: false, error: error instanceof Error ? error.message : "Unknown error" })
       })
     return true
   }

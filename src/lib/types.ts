@@ -1,25 +1,31 @@
 // Panopto Delivery Info types
 export interface DeliveryInfo {
-  publicId: string
   sessionId: string
   sessionName: string
   duration: number
-  isAudioPodcastReady: boolean
-  fallbackStreamUrl: string | null
+  masterPlaylistUrl: string
   sourceUrl: string
 }
 
-// Upload progress tracking
+// Progress tracking
 export interface UploadProgress {
-  phase: "idle" | "downloading" | "uploading" | "processing" | "done" | "error"
+  phase: "idle" | "extracting" | "processing" | "done" | "error"
   percent: number
   message: string
-  method?: "primary" | "fallback"
+  current?: number
+  total?: number
 }
 
 // Message types for content script <-> popup communication
-export interface DownloadVideoMessage {
-  action: "downloadVideo"
+export interface ImportLectureMessage {
+  action: "importLecture"
+  courseId: string
+  sessionToken?: string
+}
+
+export interface BatchImportMessage {
+  action: "batchImport"
+  sessionIds: string[]
   courseId: string
   sessionToken?: string
 }
@@ -29,58 +35,43 @@ export interface ProgressUpdateMessage {
   progress: UploadProgress
 }
 
-export type ContentScriptMessage = DownloadVideoMessage | ProgressUpdateMessage
+export type ContentScriptMessage = ImportLectureMessage | BatchImportMessage | ProgressUpdateMessage
 
 // Response types
-export interface DownloadResult {
+export interface ImportResult {
   success: boolean
   message?: string
   error?: string
   lectureId?: string
-  method?: "primary" | "fallback"
 }
 
-export interface LectureDownloadResponse {
-  lecture_id: string
-  status: string
-}
-
-export interface LectureAudioResponse {
-  lecture_id: string
-  status: string
-}
-
-// Background script message types
-export interface FetchAndUploadAudioMessage {
-  action: "fetchAndUploadAudio"
-  audioPodcastUrl: string
-  metadata: LectureMetadata
-  backendUrl: string
-  sessionToken?: string
-  apiKey?: string | null
-}
-
-export interface FetchAndUploadAudioResponse {
+export interface BatchImportResult {
   success: boolean
-  lectureId?: string
-  error?: string
+  results: Array<{
+    sessionId: string
+    success: boolean
+    lectureId?: string
+    error?: string
+  }>
 }
 
-// Backend payload types
-export interface BackendPayload {
+export interface LectureStreamResponse {
+  lecture_id: string
+  status: string
+}
+
+// Stream payload sent to backend
+export interface StreamPayload {
   streamUrl: string
-  title?: string | null
-  sourceUrl?: string
-  backendUrl: string
+  sessionId: string
   courseId: string
-  apiKey?: string | null
-  sessionToken?: string
+  title: string
+  sourceUrl: string
+  duration?: number
 }
 
-export interface LectureMetadata {
-  session_id: string
-  course_id: string
-  title: string
-  duration: number
-  source_url: string
+// HLS playlist variant
+export interface HlsVariant {
+  bandwidth: number
+  url: string
 }

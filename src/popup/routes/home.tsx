@@ -20,6 +20,7 @@ type RawCourse = {
   code?: string
   course_code?: string
   name?: string
+  title?: string
   course_name?: string
   [key: string]: unknown
 }
@@ -88,10 +89,8 @@ export const Home = () => (
 const ProgressBar = ({ progress }: { progress: UploadProgress }) => {
   const getPhaseColor = () => {
     switch (progress.phase) {
-      case "downloading":
+      case "extracting":
         return "#3b82f6" // blue
-      case "uploading":
-        return "#8b5cf6" // purple
       case "processing":
         return "#f59e0b" // amber
       case "done":
@@ -103,7 +102,7 @@ const ProgressBar = ({ progress }: { progress: UploadProgress }) => {
     }
   }
 
-  const isIndeterminate = progress.phase === "processing" && progress.percent === 0
+  const isIndeterminate = progress.phase === "extracting" && progress.percent === 0
 
   return (
     <div className="progress-container">
@@ -251,7 +250,7 @@ const PopupContent = () => {
         headers.Authorization = `Bearer ${settings.apiKey}`
       }
 
-      const response = await fetch(`${resolvedBackend}/api/courses`, {
+      const response = await fetch(`${resolvedBackend}/api/user/courses`, {
         method: "GET",
         headers
       })
@@ -275,7 +274,7 @@ const PopupContent = () => {
         .map((course) => {
           const rawId = course.id ?? course.course_id ?? course.code ?? course.course_code
           const code = course.code ?? course.course_code ?? ""
-          const name = course.name ?? course.course_name ?? ""
+          const name = course.name ?? course.title ?? course.course_name ?? ""
           const label = code && name ? `${code} - ${name}` : name || code || "Untitled course"
 
           if (!rawId) {
@@ -334,17 +333,15 @@ const PopupContent = () => {
         message?: string
         error?: string
         lectureId?: string
-        method?: "primary" | "fallback"
       }>(tabId, {
-        action: "downloadVideo",
+        action: "importLecture",
         courseId: selectedCourse,
         sessionToken
       })
 
       if (response?.success) {
         const lectureHint = response.lectureId ? ` (ID: ${response.lectureId})` : ""
-        const methodHint = response.method === "primary" ? " [Direct]" : " [Server]"
-        showStatus("success", `${response.message ?? "Upload complete!"}${lectureHint}${methodHint}`)
+        showStatus("success", `${response.message ?? "Lecture imported!"}${lectureHint}`)
       } else {
         showStatus("error", response?.error ?? "Unknown error")
       }
@@ -367,22 +364,22 @@ const PopupContent = () => {
   }, [status])
 
   const buttonText = useMemo(() => {
-    if (!isSending) return "Send to Study Buddy"
+    if (!isSending) return "Import Lecture"
 
     if (uploadProgress) {
       switch (uploadProgress.phase) {
-        case "downloading":
-          return "Downloading..."
-        case "uploading":
-          return "Uploading..."
+        case "extracting":
+          return "Extracting..."
         case "processing":
           return "Processing..."
+        case "done":
+          return "Done!"
         default:
-          return "Sending..."
+          return "Importing..."
       }
     }
 
-    return "Sending..."
+    return "Importing..."
   }, [isSending, uploadProgress])
 
   return (

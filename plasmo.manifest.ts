@@ -9,7 +9,8 @@ const manifest = {
   host_permissions: [
     "https://*.panopto.com/*",
     "https://*.panopto.eu/*",
-    "http://localhost:8000/*",
+    "https://*.up.railway.app/*",
+    "http://localhost:3000/*",
     "http://localhost/*",
     ...(clerkHost ? [clerkHost] : [])
   ],
