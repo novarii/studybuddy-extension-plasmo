@@ -13,9 +13,10 @@ const router = createMemoryRouter([
     element: <RootLayout />,
     children: [
       { path: "/", element: <Home /> },
-      { path: "/sign-in", element: <SignInPage /> },
-      { path: "/sign-up", element: <SignUpPage /> },
-      { path: "/settings", element: <Settings /> }
+      { path: "/sign-in/*", element: <SignInPage /> },
+      { path: "/sign-up/*", element: <SignUpPage /> },
+      { path: "/settings", element: <Settings /> },
+      { path: "*", element: <Home /> }
     ]
   }
 ])

@@ -1,4 +1,4 @@
-export const DEFAULT_BACKEND_URL = "https://studybuddy-production-1d1c.up.railway.app"
+export const DEFAULT_BACKEND_URL = "https://app.studybuddy.me"
 
 const SETTINGS_KEYS = ["backendUrl", "apiKey"] as const
 

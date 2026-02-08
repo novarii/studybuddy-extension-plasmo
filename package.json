@@ -1,8 +1,8 @@
 {
   "name": "studybuddy-extension-plasmo",
-  "displayName": "Studybuddy extension plasmo",
+  "displayName": "Study Buddy",
   "version": "0.0.1",
-  "description": "Download Panopto recordings.",
+  "description": "Import Panopto lectures to Study Buddy for AI-powered studying",
   "author": "novarii",
   "scripts": {
     "dev": "plasmo dev",
@@ -28,7 +28,6 @@
     "typescript": "5.3.3"
   },
   "manifest": {
-    "key": "$CRX_PUBLIC_KEY",
     "permissions": [
       "storage",
       "activeTab",
@@ -40,9 +39,9 @@
     "host_permissions": [
       "https://*.panopto.com/*",
       "https://*.panopto.eu/*",
-      "https://*.hosted.panopto.com/*",
-      "http://localhost:8000/*",
-      "http://localhost/*",
+      "https://app.studybuddy.me/*",
+      "https://accounts.studybuddy.me/*",
+      "https://*.clerk.accounts.dev/*",
       "$CLERK_FRONTEND_API/*"
     ],
     "background": {

@@ -96,7 +96,7 @@ src/
     "https://*.panopto.com/*",
     "https://*.panopto.eu/*",
     "https://*.hosted.panopto.com/*",
-    "http://localhost:8000/*",
+    "http://localhost:3000/*",
     "http://localhost/*"
   ]
 }

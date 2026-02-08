@@ -35,3 +35,5 @@ dist/
 
 .env.development
 .env.chrome
+
+tsconfig.tsbuildinfo

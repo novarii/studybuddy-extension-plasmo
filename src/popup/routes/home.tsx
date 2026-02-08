@@ -250,7 +250,7 @@ const PopupContent = () => {
         headers.Authorization = `Bearer ${settings.apiKey}`
       }
 
-      const response = await fetch(`${resolvedBackend}/api/user/courses`, {
+      const response = await fetch(`${resolvedBackend}/api/user/courses/`, {
         method: "GET",
         headers
       })

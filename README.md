@@ -6,7 +6,7 @@ Browser extension for sending Panopto recordings to the Study Buddy backend for 
 
 - Node.js 20+
 - [pnpm](https://pnpm.io/) (repo was bootstrapped with pnpm; other package managers are not supported)
-- Running Study Buddy backend API (default `http://localhost:8000`)
+- Running Study Buddy backend API (default `http://localhost:3000`)
 
 Install dependencies once after cloning:
 
@@ -41,7 +41,7 @@ CLERK_FRONTEND_API=https://<your-subdomain>.clerk.accounts.dev
 
 ### Backend Configuration
 
-- Default backend URL is `http://localhost:8000` (`src/lib/storage.ts`). Users can override it through extension settings (synced via `chrome.storage.sync`).
+- Default backend URL is `http://localhost:3000` (`src/lib/storage.ts`). Users can override it through extension settings (synced via `chrome.storage.sync`).
 - The content script (`src/contents/panopto.tsx`) posts `{ course_id, panopto_url, stream_url, title }` to `/api/lectures/download` with either the logged-in Clerk session token or the saved API key.
 
 ## Building & Packaging
