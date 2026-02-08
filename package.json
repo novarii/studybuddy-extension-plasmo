@@ -32,9 +32,7 @@
       "storage",
       "activeTab",
       "tabs",
-      "scripting",
-      "notifications",
-      "cookies"
+      "notifications"
     ],
     "host_permissions": [
       "https://*.panopto.com/*",
